@@ -2,29 +2,39 @@ USE vote_db;
 
 -- Clear existing data in the correct order (to avoid foreign key constraints)
 DELETE FROM votes;
+DELETE FROM poll_options;
+DELETE FROM poll_questions;
 DELETE FROM polls;
 DELETE FROM users;
 
--- Insert users with explicit IDs
-INSERT INTO users (id, username, email, password, role, isVerified) VALUES
-(1, 'admin', 'admin@admin.ma', '$2a$10$nxrd/5hgjFSPkC1JkQe01udb6bzpZvS0ShF9EYPhjZ4dVAvEXIDvS', 'admin', true),
-(2, 'user1', 'user1@example.com', '$2a$10$nxrd/5hgjFSPkC1JkQe01udb6bzpZvS0ShF9EYPhjZ4dVAvEXIDvS', 'user', true),
-(3, 'user2', 'user2@example.com', '$2a$10$nxrd/5hgjFSPkC1JkQe01udb6bzpZvS0ShF9EYPhjZ4dVAvEXIDvS', 'user', true);
+-- Insert sample users with hashed passwords
+INSERT INTO users (username, password, email, role, isVerified) VALUES
+('admin', '$2a$10$JaCpmeAPWuFRWpZ8lX0SyOq8eU8CcpgD.b6f0K5n37HgGPPCjkJZG', 'admin@example.com', 'admin', true),
+('user1', '$2a$10$WUUFKDlF5BV8ChsZ7bpSa.r.wQ0iPpQznDnEnWSF2Pxh0PgSbSNAW', 'user1@example.com', 'user', true);
 
--- Insert test polls with explicit IDs
-INSERT INTO polls (id, question, option1, option2, option3, option4, end_time, created_by) VALUES
-(1, 'What is your favorite programming language?', 'JavaScript', 'Python', 'Java', 'C++', 
- DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 7 DAY), 1),
-(2, 'Which framework do you prefer?', 'React', 'Angular', 'Vue', 'Svelte', 
- DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 7 DAY), 1);
+-- Insert sample poll
+INSERT INTO polls (title, description, start_time, duration_minutes, end_time, status, created_by) VALUES
+('Employee Satisfaction Survey', 'Help us improve our workplace!', 
+ CURRENT_TIMESTAMP, 1440, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 DAY), 'active', 1);
 
--- Insert test votes
-INSERT INTO votes (poll_id, user_id, option_selected) VALUES
-(1, 2, 1),  -- user1 votes for JavaScript in poll1
-(1, 3, 2),  -- user2 votes for Python in poll1
-(2, 2, 1),  -- user1 votes for React in poll2
-(2, 3, 3);  -- user2 votes for Vue in poll2
+-- Insert sample questions
+INSERT INTO poll_questions (poll_id, question_text, question_order) VALUES
+(1, 'How satisfied are you with your work environment?', 1),
+(1, 'How would you rate the company culture?', 2);
+
+-- Insert sample options
+INSERT INTO poll_options (question_id, option_text, option_order) VALUES
+(1, 'Very Satisfied', 1),
+(1, 'Satisfied', 2),
+(1, 'Neutral', 3),
+(1, 'Dissatisfied', 4),
+(2, 'Excellent', 1),
+(2, 'Good', 2),
+(2, 'Fair', 3),
+(2, 'Poor', 4);
 
 -- Reset auto-increment values
-ALTER TABLE users AUTO_INCREMENT = 4;
-ALTER TABLE polls AUTO_INCREMENT = 3;
+ALTER TABLE users AUTO_INCREMENT = 3;
+ALTER TABLE polls AUTO_INCREMENT = 2;
+ALTER TABLE poll_questions AUTO_INCREMENT = 3;
+ALTER TABLE poll_options AUTO_INCREMENT = 9;
