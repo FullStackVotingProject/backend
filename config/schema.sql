@@ -1,6 +1,6 @@
 -- Create database if it doesn't exist
-CREATE DATABASE IF NOT EXISTS project_vote;
-USE project_vote;
+CREATE DATABASE IF NOT EXISTS vote_db;
+USE vote_db;
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
