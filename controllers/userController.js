@@ -374,11 +374,50 @@ const updateProfile = async (req, res) => {
     }
 };
 
+// Update password
+const updatePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        // Get user's current password
+        const [rows] = await db.query(
+            'SELECT password FROM users WHERE id = ?',
+            [req.user.id]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Verify current password
+        const validPassword = await bcrypt.compare(currentPassword, rows[0].password);
+        if (!validPassword) {
+            return res.status(400).json({ message: 'Current password is incorrect' });
+        }
+
+        // Hash new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // Update password
+        await db.query(
+            'UPDATE users SET password = ? WHERE id = ?',
+            [hashedPassword, req.user.id]
+        );
+
+        res.json({ message: 'Password updated successfully' });
+    } catch (error) {
+        console.error('Error updating password:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
 module.exports = {
     register,
     login,
     getProfile,
     updateProfile,
     verifyEmail,
-    resendVerification
+    resendVerification,
+    updatePassword
 };

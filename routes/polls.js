@@ -4,7 +4,19 @@ const db = require('../config/db');
 const auth = require('../middleware/auth');
 const { check, validationResult } = require('express-validator');
 
-// Get all polls
+// Log all routes
+router.use((req, res, next) => {
+    console.log('Poll route accessed:', {
+        method: req.method,
+        path: req.path,
+        params: req.params,
+        query: req.query,
+        body: req.body
+    });
+    next();
+});
+
+// Get all polls (both active and ended)
 router.get('/', auth, async (req, res) => {
     try {
         const [polls] = await db.query(`
@@ -43,6 +55,31 @@ router.get('/', auth, async (req, res) => {
                 question.options = options;
             }
             poll.questions = questions;
+
+            // Add status field to each poll
+            const currentDate = new Date();
+            const endDate = new Date(poll.end_time);
+            
+            // Ensure both dates are in the same timezone for comparison
+            const currentUTC = Date.UTC(
+                currentDate.getUTCFullYear(),
+                currentDate.getUTCMonth(),
+                currentDate.getUTCDate(),
+                currentDate.getUTCHours(),
+                currentDate.getUTCMinutes(),
+                currentDate.getUTCSeconds()
+            );
+            
+            const endUTC = Date.UTC(
+                endDate.getUTCFullYear(),
+                endDate.getUTCMonth(),
+                endDate.getUTCDate(),
+                endDate.getUTCHours(),
+                endDate.getUTCMinutes(),
+                endDate.getUTCSeconds()
+            );
+            
+            poll.status = currentUTC < endUTC ? 'active' : 'ended';
         }
 
         res.json(polls);
@@ -87,10 +124,242 @@ router.get('/:id', auth, async (req, res) => {
         }
 
         poll.questions = questions;
+
+        // Add status field to each poll
+        const currentDate = new Date();
+        const endDate = new Date(poll.end_time);
+        
+        // Ensure both dates are in the same timezone for comparison
+        const currentUTC = Date.UTC(
+            currentDate.getUTCFullYear(),
+            currentDate.getUTCMonth(),
+            currentDate.getUTCDate(),
+            currentDate.getUTCHours(),
+            currentDate.getUTCMinutes(),
+            currentDate.getUTCSeconds()
+        );
+        
+        const endUTC = Date.UTC(
+            endDate.getUTCFullYear(),
+            endDate.getUTCMonth(),
+            endDate.getUTCDate(),
+            endDate.getUTCHours(),
+            endDate.getUTCMinutes(),
+            endDate.getUTCSeconds()
+        );
+        
+        poll.status = currentUTC < endUTC ? 'active' : 'ended';
+
         res.json(poll);
     } catch (error) {
         console.error('Error fetching poll:', error);
         res.status(500).json({ message: 'Server error' });
+    }
+});
+
+// Get a single poll by ID with vote details
+router.get('/:id/votes', auth, async (req, res) => {
+    const pollId = req.params.id;
+    console.log(`Fetching votes for poll ID: ${pollId}`);
+    
+    try {
+        // First, verify the poll exists and user has access
+        const [polls] = await db.query(
+            'SELECT * FROM polls WHERE id = ?',
+            [pollId]
+        );
+        
+        if (!polls || polls.length === 0) {
+            console.log(`Poll not found: ${pollId}`);
+            return res.status(404).json({
+                success: false,
+                message: 'Poll not found'
+            });
+        }
+
+        // Get poll questions
+        const [questions] = await db.query(
+            'SELECT * FROM poll_questions WHERE poll_id = ? ORDER BY question_order',
+            [pollId]
+        );
+        console.log(`Found ${questions.length} questions for poll ${pollId}`);
+
+        // Get options and votes for each question
+        for (let question of questions) {
+            const [options] = await db.query(`
+                SELECT 
+                    o.*,
+                    COUNT(DISTINCT v.id) as vote_count
+                FROM poll_options o
+                LEFT JOIN votes v ON o.id = v.option_id AND v.question_id = ?
+                WHERE o.question_id = ?
+                GROUP BY o.id
+                ORDER BY o.option_order
+            `, [question.id, question.id]);
+            
+            question.options = options;
+            console.log(`Found ${options.length} options for question ${question.id}`);
+        }
+
+        // Get votes with user details
+        const [votes] = await db.query(`
+            SELECT 
+                v.id as vote_id,
+                v.user_id,
+                v.voted_at as vote_time,
+                u.username,
+                u.email,
+                q.id as question_id,
+                q.question_text,
+                o.option_text
+            FROM votes v
+            JOIN users u ON v.user_id = u.id
+            JOIN poll_options o ON v.option_id = o.id
+            JOIN poll_questions q ON v.question_id = q.id
+            WHERE q.poll_id = ?
+            ORDER BY v.user_id, v.voted_at
+        `, [pollId]);
+        console.log(`Found ${votes.length} votes for poll ${pollId}`);
+
+        // Process votes into user-based structure
+        const votersMap = new Map();
+        votes.forEach(vote => {
+            if (!votersMap.has(vote.user_id)) {
+                votersMap.set(vote.user_id, {
+                    id: vote.user_id,
+                    username: vote.username,
+                    email: vote.email,
+                    votes: []
+                });
+            }
+            votersMap.get(vote.user_id).votes.push({
+                vote_id: vote.vote_id,
+                question_id: vote.question_id,
+                question_text: vote.question_text,
+                option_text: vote.option_text,
+                vote_time: vote.vote_time
+            });
+        });
+
+        // Prepare response
+        const response = {
+            success: true,
+            poll: {
+                id: polls[0].id,
+                title: polls[0].title,
+                description: polls[0].description,
+                start_time: polls[0].start_time,
+                end_time: polls[0].end_time,
+                created_at: polls[0].created_at,
+                status: new Date() < new Date(polls[0].end_time) ? 'active' : 'ended',
+                questions: questions.map(q => ({
+                    id: q.id,
+                    question_text: q.question_text,
+                    question_order: q.question_order,
+                    options: (q.options || []).map(o => ({
+                        id: o.id,
+                        option_text: o.option_text,
+                        option_order: o.option_order,
+                        vote_count: o.vote_count || 0
+                    }))
+                })),
+                voters: Array.from(votersMap.values()),
+                statistics: {
+                    total_questions: questions.length,
+                    total_voters: votersMap.size,
+                    total_votes: votes.length
+                }
+            }
+        };
+
+        console.log('Successfully prepared response');
+        return res.json(response);
+
+    } catch (error) {
+        console.error('Error in /polls/:id/votes:', error);
+        console.error('Stack trace:', error.stack);
+
+        // Check for specific database errors
+        if (error.code) {
+            console.error('Database error code:', error.code);
+            console.error('SQL State:', error.sqlState);
+            console.error('SQL Message:', error.sqlMessage);
+
+            // Handle specific database errors
+            switch (error.code) {
+                case 'ER_NO_SUCH_TABLE':
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Database schema error. Please contact support.',
+                        error: 'Missing required database table'
+                    });
+                case 'ER_BAD_FIELD_ERROR':
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Database schema error. Please contact support.',
+                        error: 'Invalid database field'
+                    });
+                default:
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Database error occurred',
+                        error: error.sqlMessage || error.message
+                    });
+            }
+        }
+
+        // Handle other types of errors
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+});
+
+// Test route to check database state
+router.get('/debug/poll/:id', auth, async (req, res) => {
+    try {
+        console.log('Debug: Checking poll ID:', req.params.id);
+        
+        // Check polls table
+        const [pollData] = await db.query('SELECT * FROM polls WHERE id = ?', [req.params.id]);
+        console.log('Debug: Poll data:', pollData);
+
+        // Check questions
+        const [questions] = await db.query('SELECT * FROM poll_questions WHERE poll_id = ?', [req.params.id]);
+        console.log('Debug: Questions:', questions);
+
+        // Check options and votes
+        const questionIds = questions.map(q => q.id);
+        if (questionIds.length > 0) {
+            const [options] = await db.query(
+                'SELECT * FROM poll_options WHERE question_id IN (?)',
+                [questionIds]
+            );
+            console.log('Debug: Options:', options);
+
+            const optionIds = options.map(o => o.id);
+            if (optionIds.length > 0) {
+                const [votes] = await db.query(
+                    'SELECT * FROM votes WHERE option_id IN (?)',
+                    [optionIds]
+                );
+                console.log('Debug: Votes:', votes);
+            }
+        }
+
+        res.json({
+            poll: pollData[0] || null,
+            questions: questions,
+            message: 'Check server logs for detailed debug info'
+        });
+    } catch (error) {
+        console.error('Debug route error:', error);
+        res.status(500).json({ 
+            message: 'Debug route error',
+            error: error.message
+        });
     }
 });
 

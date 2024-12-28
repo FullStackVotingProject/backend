@@ -1,84 +1,96 @@
-const db = require('../config/db');
+const { Pool } = require('pg');
+const schedule = require('node-schedule');
 
 class PollSessionService {
     constructor(io) {
         this.io = io;
-        this.activeTimers = new Map();
-        this.initializeTimers();
+        this.jobs = new Map();
+        this.pool = new Pool(); // Utilise les variables d'environnement pour la configuration
     }
 
-    async initializeTimers() {
+    // Initialise les timers pour tous les sondages actifs
+    async initializeActivePollTimers() {
         try {
-            const [activePolls] = await db.query(`
-                SELECT id, end_time 
+            const query = `
+                SELECT id, title, end_time 
                 FROM polls 
                 WHERE status = 'active' 
-                AND end_time > NOW()`
-            );
-
-            activePolls.forEach(poll => {
-                this.setPollTimer(poll.id, new Date(poll.end_time));
-            });
+                AND end_time > NOW()
+            `;
+            const { rows } = await this.pool.query(query);
+            
+            for (const poll of rows) {
+                this.schedulePollEnd(poll);
+            }
+            
+            console.log(`Initialized ${rows.length} poll timers`);
         } catch (error) {
             console.error('Error initializing poll timers:', error);
         }
     }
 
-    setPollTimer(pollId, endTime) {
-        const now = new Date();
-        const timeUntilEnd = endTime - now;
-
-        if (timeUntilEnd <= 0) {
-            this.endPollSession(pollId);
-            return;
+    // Programme la fin d'un sondage
+    schedulePollEnd(poll) {
+        if (this.jobs.has(poll.id)) {
+            this.jobs.get(poll.id).cancel();
         }
 
-        // Clear any existing timer
-        if (this.activeTimers.has(pollId)) {
-            clearTimeout(this.activeTimers.get(pollId));
-        }
+        const job = schedule.scheduleJob(new Date(poll.end_time), async () => {
+            try {
+                await this.endPoll(poll.id, poll.title);
+            } catch (error) {
+                console.error(`Error ending poll ${poll.id}:`, error);
+            }
+        });
 
-        // Set new timer
-        const timer = setTimeout(() => this.endPollSession(pollId), timeUntilEnd);
-        this.activeTimers.set(pollId, timer);
+        this.jobs.set(poll.id, job);
+        console.log(`Scheduled end for poll ${poll.id} at ${poll.end_time}`);
     }
 
-    async endPollSession(pollId) {
+    // Termine un sondage
+    async endPoll(pollId, title) {
         try {
-            // Update poll status to ended
-            await db.query(
-                'UPDATE polls SET status = ? WHERE id = ?',
-                ['ended', pollId]
-            );
+            // Mettre à jour le statut du sondage
+            const query = `
+                UPDATE polls 
+                SET status = 'completed' 
+                WHERE id = $1 
+                AND status = 'active'
+            `;
+            await this.pool.query(query, [pollId]);
 
-            // Clear the timer
-            if (this.activeTimers.has(pollId)) {
-                clearTimeout(this.activeTimers.get(pollId));
-                this.activeTimers.delete(pollId);
+            // Émettre l'événement de fin de sondage
+            this.io.emit('pollEnded', {
+                pollId,
+                title,
+                message: `Le sondage "${title}" est terminé.`
+            });
+
+            // Nettoyer le job
+            if (this.jobs.has(pollId)) {
+                this.jobs.delete(pollId);
             }
 
-            // Get poll details for notification
-            const [polls] = await db.query(
-                'SELECT title FROM polls WHERE id = ?',
-                [pollId]
-            );
-
-            if (polls.length > 0) {
-                // Notify all connected clients
-                this.io.emit('pollEnded', {
-                    pollId,
-                    title: polls[0].title,
-                    message: `Le vote "${polls[0].title}" est maintenant terminé.`
-                });
-            }
+            console.log(`Poll ${pollId} ended successfully`);
         } catch (error) {
-            console.error('Error ending poll session:', error);
+            console.error(`Error ending poll ${pollId}:`, error);
+            throw error;
         }
     }
 
-    // Call this when a new poll is created
-    addPollSession(pollId, endTime) {
-        this.setPollTimer(pollId, new Date(endTime));
+    // Ajoute un nouveau sondage
+    addPoll(poll) {
+        if (poll.end_time) {
+            this.schedulePollEnd(poll);
+        }
+    }
+
+    // Nettoie les ressources
+    cleanup() {
+        for (const job of this.jobs.values()) {
+            job.cancel();
+        }
+        this.jobs.clear();
     }
 }
 

@@ -5,7 +5,6 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const db = require('./config/db');
 const http = require('http');
 const socketIo = require('socket.io');
-const PollSessionService = require('./services/pollSessionService');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -22,18 +21,13 @@ const io = socketIo(server, {
   }
 });
 
-// Initialize poll session service
-const pollSessionService = new PollSessionService(io);
-
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: "http://localhost:3000",
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 app.use(express.json());
-
-// Make pollSessionService available to routes
-app.use((req, res, next) => {
-  req.pollSessionService = pollSessionService;
-  next();
-});
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -48,16 +42,6 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('Client disconnected');
   });
-});
-
-// Test database route
-app.get('/api/test', async (req, res) => {
-  try {
-    const [rows] = await db.query('SELECT 1 as test');
-    res.json({ message: 'Backend is working!', dbTest: rows[0] });
-  } catch (error) {
-    res.status(500).json({ message: 'Database error', error: error.message });
-  }
 });
 
 // Error handling middleware

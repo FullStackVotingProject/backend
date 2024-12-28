@@ -1,3 +1,4 @@
+
 USE vote_db;
 
 -- Clear existing data in the correct order (to avoid foreign key constraints)
