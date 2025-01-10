@@ -423,9 +423,9 @@ router.post('/', [
             pollId: pollId
         });
     } catch (error) {
-        await connection.rollback();
-        console.error('Error creating poll:', error);
-        res.status(500).json({ message: 'Server error' });
+        // await connection.rollback();
+        // console.error('Error creating poll:', error);
+        // res.status(500).json({ message: 'Server error' });
     } finally {
         connection.release();
     }
