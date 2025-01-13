@@ -30,3 +30,26 @@ const emailService = {
 };
 
 module.exports = emailService;
+                    
+                    <p>Pour voir les résultats détaillés, cliquez sur le lien ci-dessous :</p>
+                    <a href="${pollUrl}" style="display: inline-block; padding: 10px 20px; background-color: #4F46E5; color: white; text-decoration: none; border-radius: 4px; margin-top: 10px;">
+                        Voir les résultats détaillés
+                    </a>
+                `
+            };
+
+            console.log('Sending email with options:', {
+                to: email,
+                subject: mailOptions.subject
+            });
+
+            await transporter.sendMail(mailOptions);
+            console.log('Poll results email sent successfully to:', email);
+        } catch (error) {
+            console.error('Error sending poll results email:', error);
+            throw error;
+        }
+    }
+};
+
+module.exports = emailService;
